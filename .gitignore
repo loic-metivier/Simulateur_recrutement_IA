@@ -8,3 +8,5 @@ agent/.env
 .DS_Store
 .vercel
 .env*.local
+
+__pycache__/

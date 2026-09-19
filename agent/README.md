@@ -1,43 +1,21 @@
-# LiveKit Vocal Agent - SPIN Selling Simulator
+# Agent vocal EntretienLab
 
-Ce dossier contient l'agent vocal intelligent codé en Python. Il utilise le framework d'agents LiveKit et le plugin officiel de Google pour connecter en temps réel les salons vocaux WebRTC à la Gemini Live API (Speech-to-Speech natif).
+Le worker accepte uniquement les salons `room_recruiter-*` et s’enregistre sous le nom `recruitment-agent`. L’API `api/get-token.ts` demande explicitement ce worker via la configuration du salon.
 
----
+Les scénarios prédéfinis sont dans `main.py`. Les scénarios personnalisés sont validés par `utils/livekit-token.ts` puis transmis dans les métadonnées signées du job. Firestore sert au suivi, pas au démarrage vocal.
 
-## 🛠️ Installation Locale
+## Configuration
 
-1. **Prérequis :** Assurez-vous d'avoir Python 3.9+ d'installé.
-2. **Créer un environnement virtuel :**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Sur Mac / Linux
-   # ou venv\Scripts\activate sur Windows
-   ```
-3. **Installer les dépendances :**
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. **Fichier d'environnement :** Copiez le fichier `.env.local` du projet principal dans ce dossier `/agent` sous le nom de `.env` :
-   ```env
-   LIVEKIT_URL=wss://...
-   LIVEKIT_API_KEY=...
-   LIVEKIT_API_SECRET=...
-   GOOGLE_API_KEY=AQ... (votre clé Gemini API)
-   ```
+Définir dans `agent/.env` : LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET et GEMINI_API_KEY. Ne pas committer les valeurs.
 
----
+Sur le VPS OVH concerné, conserver `GEMINI_FORCE_IPV4=1` dans l’environnement PM2. Le module `gemini_network.py` limite ce réglage au WebSocket Gemini ; il conserve la vérification TLS. Le trajet IPv6 de ce VPS déclenchait une erreur de localisation chez Gemini.
 
-## 🚀 Exécution
+Lancement : `venv/bin/python main.py start`.
+Service existant : `livekit-recruitment-agent` dans PM2, dossier `/home/ubuntu/Simulateur_recrutement_agent/agent`.
 
-### En local (Développement)
-Pour tester localement, lancez l'agent en mode développement. Il se connectera au serveur LiveKit Cloud et écoutera les nouveaux salons :
-```bash
-python main.py dev
-```
+## Vérification
 
-### Déploiement en Production (Sur votre VPS CPU-only)
-1. Installez Python et le gestionnaire de processus `pm2` ou créez un service `systemd` sur votre VPS pour garder le script actif.
-2. Exécutez le script en mode production :
-   ```bash
-   python main.py start
-   ```
+- `node --test tests/*.test.mjs` depuis la racine : jetons, scénario personnalisé, disponibilité de l’agent, annulation et contrôle du micro.
+- `python -m py_compile agent/main.py agent/gemini_network.py`.
+- En ligne : choisir un scénario, tester le micro, démarrer, vérifier introduction et réponse, couper/réactiver le micro, terminer. Refaire avec une offre personnalisée.
+- `agent_ready` annonce que l’introduction a été générée ; `agent_error` arrête l’attente côté navigateur. Le navigateur impose aussi un délai de connexion et propose d’activer le son si l’autoplay est bloqué.

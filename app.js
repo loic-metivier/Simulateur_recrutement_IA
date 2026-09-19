@@ -603,6 +603,7 @@
     if (viewName === "home") {
       logSessionAction('reset_game', 'Est retourné à la liste de sélection des prospects');
     }
+    if (state.currentView === "interview" && viewName !== "interview") stopConnection();
     const stepMap = { home: 1, prep: 2, interview: 3, report: 4 };
     window.clearTimeout(announceTimeout);
     announcer.textContent = "";
@@ -679,7 +680,7 @@
       testButton.hidden = true;
     } else if (state.voiceMicReady) {
       $("#mic-status-title").textContent = "Micro prêt";
-      $("#mic-status-copy").textContent = "Votre niveau sonore est suffisant.";
+      $("#mic-status-copy").textContent = "Votre microphone est accessible. Vérifiez qu’il n’est pas coupé.";
       testButton.textContent = "Tester à nouveau";
       testButton.disabled = false;
       testButton.hidden = false;
@@ -696,22 +697,35 @@
       : "Testez le micro pour continuer.";
   }
 
-  function testMicrophone() {
-    const box = $("#microphone-check");
+  async function testMicrophone() {
+    state.voiceMicReady = false;
     const button = $("#test-microphone");
-    box.classList.remove("is-ready");
-    box.classList.add("is-testing");
-    $("#mic-status-title").textContent = "Parlez quelques secondes…";
-    $("#mic-status-copy").textContent = "Nous vérifions uniquement le niveau sonore.";
     button.disabled = true;
-    button.textContent = "Test en cours…";
-    announce("Test du micro en cours. Parlez quelques secondes.");
-    window.setTimeout(() => {
-      state.voiceMicReady = true;
-      box.classList.remove("is-testing");
+    $("#start-interview").disabled = true;
+    $("#mic-status-title").textContent = "Autorisez l'accès au micro…";
+    let stream, expired = false, timer;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Le microphone n'est pas disponible dans ce navigateur.");
+      const request = navigator.mediaDevices.getUserMedia({audio: true}).then(value => {
+        if (expired) value.getTracks().forEach(track => track.stop());
+        else stream = value;
+        return value;
+      });
+      await Promise.race([request, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Autorisez le microphone dans les réglages du navigateur, puis réessayez.")), 12000);
+      })]);
+      state.voiceMicReady = stream.getAudioTracks().some(track => track.readyState === "live");
+      if (!state.voiceMicReady) throw new Error("Aucun microphone actif détecté.");
       updatePreflight();
-      announce("Micro prêt. Vous pouvez démarrer l'entretien.");
-    }, 1700);
+    } catch (error) {
+      updatePreflight();
+      $("#mic-status-copy").textContent = error.name === "NotAllowedError" ? "Accès au micro refusé. Autorisez-le dans votre navigateur." : error.message;
+    } finally {
+      expired = true;
+      clearTimeout(timer);
+      stream?.getTracks().forEach(track => track.stop());
+      button.disabled = false;
+    }
   }
 
   function formatTime(seconds) {
@@ -727,141 +741,124 @@
     state.phaseTimeout = null;
   }
 
-  async function startInterview() {
+  function stopConnection() {
+    state.callAbort?.abort();
+    state.callAbort = null;
+    const room = state.room;
+    state.room = null;
+    state.agentReady = false;
+    room?.disconnect();
+    document.querySelectorAll('[data-interview-audio]').forEach(el => el.remove());
+    $("#enable-audio").hidden = true;
     clearInterviewTimers();
+  }
+
+  async function startInterview() {
+    stopConnection();
+    const controller = new AbortController();
+    state.callAbort = controller;
+    const signal = controller.signal;
+    const room = new LivekitClient.Room();
+    state.room = room;
+    // Called during the click gesture; a visible control handles mobile autoplay restrictions.
+    room.startAudio().catch(() => { if (state.room === room) $("#enable-audio").hidden = false; });
+    let startupTimer;
+    const guard = promise => new Promise((resolve, reject) => {
+      const abort = () => reject(new Error("Connexion annulée."));
+      if (signal.aborted) return abort();
+      signal.addEventListener('abort', abort, {once: true});
+      Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
+    const fail = message => {
+      if (state.room !== room) return;
+      stopConnection();
+      $("#connection-error").textContent = message;
+      $("#connection-error").hidden = false;
+      navigate("prep");
+    };
+    $("#connection-error").hidden = true;
     state.elapsed = 0;
     state.exchangeCount = 0;
     state.round = 0;
     state.messages = [];
-    state.transcriptVisible = false; // Toujours masqué pendant l'appel
-
     $("#interview-timer").textContent = "00:00";
     $("#interview-person-title").textContent = state.scenario.person;
     $("#interview-person").textContent = state.scenario.person;
     $("#interview-role").textContent = state.scenario.role;
     $("#interview-avatar").childNodes[0].nodeValue = state.scenario.initials;
     $("#transcript-list").innerHTML = "";
-    
-    // Masquer le panneau de transcription en direct
-    $("#transcript-panel").hidden = true;
-    $("#show-transcript").hidden = true;
-    $(".interview-layout").classList.add("transcript-hidden");
-
-    $(".interview-stage").dataset.responseMode = "voice";
-    $("#mute-button").hidden = false;
+    const textMode = state.responseMode === "text";
+    state.transcriptVisible = textMode || $("#transcript-choice").checked;
+    $("#transcript-panel").hidden = !state.transcriptVisible;
+    $("#show-transcript").hidden = state.transcriptVisible;
+    $(".interview-layout").classList.toggle("transcript-hidden", !state.transcriptVisible);
+    $(".interview-stage").dataset.responseMode = state.responseMode;
+    $("#text-reply").hidden = !textMode;
+    $("#mute-button").hidden = textMode;
     $("#mute-button").setAttribute("aria-pressed", "false");
     $("#mute-button").setAttribute("aria-label", "Couper le microphone");
-    
     setConversationState("connecting");
     navigate("interview");
-
-    const sessionId = state.sessionId;
-    logSessionAction('start_roleplay', `A démarré la simulation orale avec ${state.scenario.person}`);
-
+    startupTimer = setTimeout(() => fail("Le recruteur n'a pas répondu à temps. Réessayez dans un instant."), 45000);
+    const scenario = state.scenario;
+    const custom = scenario.id.startsWith("custom") ? {
+      id: scenario.id, name: scenario.person, role: scenario.role, position: scenario.position,
+      voiceName: 'Aoede',
+      systemInstruction: `Tu es ${scenario.person}, ${scenario.role}. Tu fais passer un entretien pour le poste de ${scenario.position}, niveau ${scenario.level}. Contexte : ${scenario.context}. Pose une question à la fois, réagis aux réponses du candidat et adapte les relances. Questions à aborder : ${scenario.questions.join(' ; ')}`
+    } : undefined;
+    logSessionAction('start_roleplay', `Entretien avec ${scenario.person}`);
+    // Analytics must never block the voice connection or transport the custom scenario.
+    db.collection("sessions").doc(state.sessionId).set({recruiterId: scenario.id,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()}, {merge: true}).catch(() => {});
+    let resolveReady;
+    const ready = new Promise(resolve => { resolveReady = resolve; });
+    room.on(LivekitClient.RoomEvent.AudioPlaybackStatusChanged, () => {
+      if (state.room === room) $("#enable-audio").hidden = room.canPlaybackAudio;
+    });
+    room.on(LivekitClient.RoomEvent.Disconnected, () => fail("La connexion vocale a été interrompue. Relancez l'entretien."));
+    room.on(LivekitClient.RoomEvent.ParticipantDisconnected, participant => {
+      if (participant.isAgent) fail("Le recruteur s'est déconnecté. Relancez l'entretien.");
+    });
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+      if (state.room !== room || !participant.isAgent || track.kind !== 'audio') return;
+      const el = track.attach();
+      el.dataset.interviewAudio = 'true';
+      document.body.appendChild(el);
+      el.play().catch(() => { if (state.room === room) $("#enable-audio").hidden = false; });
+    });
+    room.on(LivekitClient.RoomEvent.TrackUnsubscribed, track => track.detach().forEach(el => el.remove()));
+    room.on(LivekitClient.RoomEvent.DataReceived, (payload, participant) => {
+      if (state.room !== room || !participant?.isAgent) return;
+      let parsed;
+      try { parsed = JSON.parse(new TextDecoder().decode(payload)); } catch { return; }
+      if (parsed.type === 'agent_error') return fail(parsed.message || "Le recruteur est indisponible.");
+      if (parsed.type === 'agent_ready') { state.agentReady = true; resolveReady(); }
+      if (parsed.type === 'transcript' && typeof parsed.text === 'string' && parsed.text.trim()) {
+        const role = parsed.role === 'user' ? 'candidate' : 'recruiter';
+        addTranscript(role, role === 'candidate' ? 'Vous' : scenario.person, parsed.text);
+        state.exchangeCount = state.messages.filter(m => m.type === 'candidate').length;
+        state.round = state.exchangeCount;
+      }
+    });
+    room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, speakers => {
+      if (state.room === room && state.agentReady) setConversationState(speakers.some(s => s.isAgent) ? "interviewer" : "user-ready");
+    });
     try {
-      // 1. Enregistrement de la session dans Firestore
-      if (state.scenario.id.startsWith("custom")) {
-        const customPrompt = `Tu es ${state.scenario.person}, ${state.scenario.role}. Tu fais passer un entretien d'embauche personnalisé pour le poste de ${state.scenario.position} (Niveau : ${state.scenario.level}).
-L'offre d'emploi ou le contexte de l'entreprise est le suivant :
-${state.scenario.context}
-
-Ton rôle est de mener cet entretien RH de manière professionnelle, bienveillante mais rigoureuse. Pose ces questions une par une au fil de l'entretien en réagissant brièvement à ce que dit le candidat :
-1. ${state.scenario.questions[0]} (Déjà posée au démarrage)
-2. ${state.scenario.questions[1]}
-3. ${state.scenario.questions[2]}
-4. ${state.scenario.questions[3]}
-5. ${state.scenario.questions[4]}
-`;
-        await db.collection("sessions").doc(sessionId).set({
-          activeProspect: {
-            name: state.scenario.person,
-            role: state.scenario.role,
-            position: state.scenario.position,
-            level: state.scenario.level,
-            voiceName: 'Aoede',
-            systemInstruction: customPrompt
-          },
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      } else {
-        await db.collection("sessions").doc(sessionId).set({
-          recruiterId: state.scenario.id,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      }
-
-      // 2. Récupération du jeton LiveKit
-      const roomName = `room_recruiter-${state.scenario.id}_session-${sessionId}`;
-      const response = await fetch(`/api/get-token?roomName=${encodeURIComponent(roomName)}&participantName=candidat`);
-      if (!response.ok) {
-        throw new Error("Impossible de générer le jeton de connexion");
-      }
-      const data = await response.json();
-      const token = data.token;
-      const serverUrl = data.serverUrl || "wss://voice-ai-similateur-de-vente-zwon3kb4.livekit.cloud";
-
-      // 3. Connexion à la salle LiveKit
-      const room = new LivekitClient.Room();
-      state.room = room;
-
-      room.on(LivekitClient.RoomEvent.Connected, () => {
-        setConversationState("interviewer"); // Attendre que le recruteur parle en premier
-        state.timerId = window.setInterval(() => {
-          state.elapsed += 1;
-          $("#interview-timer").textContent = formatTime(state.elapsed);
-        }, 1000);
-      });
-
-      room.on(LivekitClient.RoomEvent.Disconnected, () => {
-        clearInterviewTimers();
-        showToast("Session déconnectée");
-      });
-
-      room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
-        if (track.kind === 'audio') {
-          const el = track.attach();
-          document.body.appendChild(el);
-        }
-      });
-
-      room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
-        if (track.kind === 'audio') {
-          const attached = track.detach();
-          attached.forEach(el => el.remove());
-        }
-      });
-
-      room.on(LivekitClient.RoomEvent.DataReceived, (payload) => {
-        try {
-          const parsed = JSON.parse(new TextDecoder().decode(payload));
-          if (parsed.type === 'transcript') {
-            const role = parsed.role === 'user' ? 'candidate' : 'recruiter';
-            const speaker = role === 'candidate' ? 'Vous' : state.scenario.person;
-            addTranscript(role, speaker, parsed.text);
-            state.exchangeCount = state.messages.filter(m => m.type === 'candidate').length;
-          }
-        } catch (e) {
-          console.error("Erreur de parsing du message canal de données :", e);
-        }
-      });
-
-      room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, (speakers) => {
-        const agentSpeaking = speakers.some(s => !s.isLocal);
-        if (agentSpeaking) {
-          setConversationState("interviewer");
-        } else {
-          setConversationState("user-ready");
-        }
-      });
-
-      await room.connect(serverUrl, token);
-      await room.localParticipant.setMicrophoneEnabled(true);
-
-    } catch (err) {
-      console.error("Échec de connexion LiveKit:", err);
-      showToast(err.message || "Échec d'établissement de l'appel");
-      navigate("prep");
-    }
+      const roomName = `room_recruiter-${scenario.id}_session-${state.sessionId}_attempt-${crypto.randomUUID()}`;
+      const response = await guard(fetch('/api/get-token', {method: 'POST', signal,
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({roomName, participantName: 'candidat', scenario: custom})}));
+      const data = await guard(response.json());
+      if (!response.ok) throw new Error(data.error || "Impossible de démarrer la connexion vocale.");
+      if (!data.serverUrl || !data.token) throw new Error("Configuration vocale indisponible.");
+      await guard(room.connect(data.serverUrl, data.token).then(() => { if (signal.aborted) room.disconnect(); }));
+      if (!textMode) await guard(room.localParticipant.setMicrophoneEnabled(true).then(() => { if (signal.aborted) room.disconnect(); }));
+      await guard(ready);
+      clearTimeout(startupTimer);
+      setConversationState("user-ready");
+      state.timerId = setInterval(() => { state.elapsed++; $("#interview-timer").textContent = formatTime(state.elapsed); }, 1000);
+    } catch (error) {
+      fail(error.name === 'NotAllowedError' ? "Autorisez le microphone, puis relancez l'entretien." : error.message);
+    } finally { clearTimeout(startupTimer); }
   }
 
   function askCurrentQuestion() {
@@ -881,7 +878,8 @@ Ton rôle est de mener cet entretien RH de manière professionnelle, bienveillan
     stage.dataset.conversationState = conversationState;
     action.classList.remove("is-listening");
     action.hidden = false;
-    textForm.hidden = true;
+    textForm.hidden = state.responseMode !== "text" || !state.agentReady;
+    action.hidden = state.responseMode === "text";
     coachCue.hidden = true;
 
     if (conversationState === "connecting") {
@@ -940,14 +938,15 @@ Ton rôle est de mener cet entretien RH de manière professionnelle, bienveillan
     list.scrollTop = list.scrollHeight;
   }
 
-  function submitCandidateTurn(message) {
-    addTranscript("candidate", "Vous", message);
-    state.exchangeCount += 1;
-    setConversationState("analysing");
-    state.phaseTimeout = window.setTimeout(() => {
-      state.round += 1;
-      askCurrentQuestion();
-    }, 1400);
+  async function submitCandidateTurn(message) {
+    if (!state.room || !state.agentReady) return showToast("Attendez que le recruteur soit prêt.");
+    try {
+      await state.room.localParticipant.sendText(message, {topic: 'lk.chat'});
+      addTranscript("candidate", "Vous", message);
+      state.exchangeCount += 1;
+      state.round = state.exchangeCount;
+      setConversationState("analysing");
+    } catch { showToast("Votre réponse n'a pas été envoyée. Réessayez."); }
   }
 
   async function buildReport() {
@@ -1076,11 +1075,7 @@ Ton rôle est de mener cet entretien RH de manière professionnelle, bienveillan
   }
 
   function finishAndShowReport() {
-    if (state.room) {
-      state.room.disconnect();
-      state.room = null;
-    }
-    clearInterviewTimers();
+    stopConnection();
     buildReport();
 
     // Suivi de session anonymise dans Firestore
@@ -1248,15 +1243,20 @@ Ton rôle est de mener cet entretien RH de manière professionnelle, bienveillan
   });
   $("#text-reply-field").addEventListener("input", (event) => event.target.setCustomValidity(""));
 
+  $("#enable-audio").addEventListener("click", async () => {
+    try { await state.room?.startAudio(); $("#enable-audio").hidden = !state.room || state.room.canPlaybackAudio; }
+    catch { showToast("Autorisez le son dans votre navigateur, puis réessayez."); }
+  });
   $("#mute-button").addEventListener("click", async (event) => {
-    const pressed = event.currentTarget.getAttribute("aria-pressed") === "true";
-    const nextMuted = !pressed;
-    event.currentTarget.setAttribute("aria-pressed", String(nextMuted));
-    event.currentTarget.setAttribute("aria-label", nextMuted ? "Réactiver le microphone" : "Couper le microphone");
-    if (state.room) {
-      await state.room.localParticipant.setMicrophoneEnabled(!nextMuted);
-    }
-    showToast(nextMuted ? "Micro coupé" : "Micro réactivé");
+    const button = event.currentTarget;
+    const muted = button.getAttribute("aria-pressed") !== "true";
+    if (!state.room) return;
+    try {
+      await state.room.localParticipant.setMicrophoneEnabled(!muted);
+      button.setAttribute("aria-pressed", String(muted));
+      button.setAttribute("aria-label", muted ? "Réactiver le microphone" : "Couper le microphone");
+      showToast(muted ? "Micro coupé" : "Micro réactivé");
+    } catch { showToast("Impossible d'activer le microphone. Vérifiez les autorisations."); }
   });
 
   const finishDialog = $("#finish-dialog");
