@@ -209,16 +209,25 @@ IMPORTANT - DIRECTIVE DE STYLE ET FORMAT :
         temperature=0.75,
         instructions=system_instruction,
         api_key=api_key,
+        # Keep spoken turns responsive; detailed evaluation happens in the report.
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
         realtime_input_config=types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
                 disabled=False,
-                silence_duration_ms=1000
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                silence_duration_ms=600
             )
         )
     )
     
     session = AgentSession(llm=llm)
     
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event):
+        if ctx.room.isconnected():
+            payload = json.dumps({'type': 'agent_state', 'state': event.new_state}).encode('utf-8')
+            asyncio.create_task(ctx.room.local_participant.publish_data(payload, reliable=True))
+
     @session.on("user_input_transcribed")
     def on_user_input_transcribed(event):
         if event.is_final and event.transcript.strip():

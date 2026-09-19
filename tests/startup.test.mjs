@@ -36,3 +36,13 @@ function microphoneHarness(request) {
 test('microphone test releases capture after success',async()=>{let stopped=false;const track={readyState:'live',stop:()=>stopped=true};const h=microphoneHarness(Promise.resolve({getAudioTracks:()=>[track],getTracks:()=>[track]}));await h.ctx.testMicrophone();assert.equal(h.state.voiceMicReady,true);assert.equal(stopped,true)});
 test('microphone denial cannot mark it ready',async()=>{const h=microphoneHarness(Promise.reject(Object.assign(Error('denied'),{name:'NotAllowedError'})));await h.ctx.testMicrophone();assert.equal(h.state.voiceMicReady,false);assert.match(h.$('#mic-status-copy').textContent,/refusé/)});
 test('late microphone permission is released after timeout',async()=>{let resolve,stopped=false;const h=microphoneHarness(new Promise(r=>resolve=r));const done=h.ctx.testMicrophone();h.expire();await done;resolve({getTracks:()=>[{stop:()=>stopped=true}]});await flush();assert.equal(stopped,true);assert.equal(h.state.voiceMicReady,false)});
+test('server turn state distinguishes thinking from listening during silence',async()=>{
+ const h=harness();const done=h.ctx.startInterview();await flush();
+ const send=(value,agent=true)=>h.room.emit('DataReceived',new TextEncoder().encode(JSON.stringify(value)),{isAgent:agent});
+ send({type:'agent_ready'});await done;
+ send({type:'agent_state',state:'thinking'},false);assert.equal(h.state.conversationState,'user-ready');
+ send({type:'agent_state',state:'thinking'});assert.equal(h.state.conversationState,'analysing');
+ h.room.emit('ActiveSpeakersChanged',[]);assert.equal(h.state.conversationState,'analysing');
+ send({type:'agent_state',state:'speaking'});assert.equal(h.state.conversationState,'interviewer');
+ send({type:'agent_state',state:'listening'});assert.equal(h.state.conversationState,'user-ready');h.ctx.stopConnection();
+});

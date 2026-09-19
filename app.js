@@ -833,15 +833,20 @@
       try { parsed = JSON.parse(new TextDecoder().decode(payload)); } catch { return; }
       if (parsed.type === 'agent_error') return fail(parsed.message || "Le recruteur est indisponible.");
       if (parsed.type === 'agent_ready') { state.agentReady = true; resolveReady(); }
+      if (parsed.type === 'agent_state' && state.agentReady) {
+        const states = {thinking: 'analysing', speaking: 'interviewer', listening: 'user-ready'};
+        if (states[parsed.state]) setConversationState(states[parsed.state]);
+      }
       if (parsed.type === 'transcript' && typeof parsed.text === 'string' && parsed.text.trim()) {
         const role = parsed.role === 'user' ? 'candidate' : 'recruiter';
         addTranscript(role, role === 'candidate' ? 'Vous' : scenario.person, parsed.text);
         state.exchangeCount = state.messages.filter(m => m.type === 'candidate').length;
         state.round = state.exchangeCount;
+        if (role === "candidate" && state.agentReady) setConversationState("analysing");
       }
     });
     room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, speakers => {
-      if (state.room === room && state.agentReady) setConversationState(speakers.some(s => s.isAgent) ? "interviewer" : "user-ready");
+      if (state.room === room && state.agentReady && speakers.some(s => s.isAgent)) setConversationState("interviewer");
     });
     try {
       const roomName = `room_recruiter-${scenario.id}_session-${state.sessionId}_attempt-${crypto.randomUUID()}`;

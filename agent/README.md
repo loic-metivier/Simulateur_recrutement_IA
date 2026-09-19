@@ -19,3 +19,7 @@ Service existant : `livekit-recruitment-agent` dans PM2, dossier `/home/ubuntu/S
 - `python -m py_compile agent/main.py agent/gemini_network.py`.
 - En ligne : choisir un scénario, tester le micro, démarrer, vérifier introduction et réponse, couper/réactiver le micro, terminer. Refaire avec une offre personnalisée.
 - `agent_ready` annonce que l’introduction a été générée ; `agent_error` arrête l’attente côté navigateur. Le navigateur impose aussi un délai de connexion et propose d’activer le son si l’autoplay est bloqué.
+
+## Réactivité des tours de parole
+
+Gemini détecte la fin de parole après 600 ms de silence, avec `END_SENSITIVITY_HIGH`. La génération vocale utilise `thinking_budget=0` pour limiter l’attente ; le bilan conserve son modèle d’analyse distinct. Le navigateur reçoit `agent_state` pour distinguer écoute, préparation de réponse et parole. Une pause plus longue que le seuil peut être interprétée comme une fin de réponse ; le réseau et la génération ajoutent un délai variable.
