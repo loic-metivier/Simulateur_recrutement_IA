@@ -22,4 +22,9 @@ Service existant : `livekit-recruitment-agent` dans PM2, dossier `/home/ubuntu/S
 
 ## Réactivité des tours de parole
 
-Gemini détecte la fin de parole après 600 ms de silence, avec `END_SENSITIVITY_HIGH`. La génération vocale utilise `thinking_budget=0` pour limiter l’attente ; le bilan conserve son modèle d’analyse distinct. Le navigateur reçoit `agent_state` pour distinguer écoute, préparation de réponse et parole. Une pause plus longue que le seuil peut être interprétée comme une fin de réponse ; le réseau et la génération ajoutent un délai variable.
+Gemini détecte la fin de parole après 450 ms de silence par défaut (variable d’environnement `SILENCE_DURATION_MS`, entre 200 et 1500 ; remonter à 600 si le recruteur coupe le candidat), avec `END_SENSITIVITY_HIGH`. La génération vocale utilise `thinking_budget=0` pour limiter l’attente ; le bilan conserve son modèle d’analyse distinct. Le navigateur reçoit `agent_state` pour distinguer écoute, préparation de réponse et parole. Une pause plus longue que le seuil peut être interprétée comme une fin de réponse ; le réseau et la génération ajoutent un délai variable.
+
+
+## Mesurer la latence
+
+Chaque tour journalise une ligne `LATENCE tour` (fin de parole détectée → début de réponse du recruteur) et `Métriques du tour`. Lecture : `pm2 logs livekit-recruitment-agent --lines 200 | grep -E "LATENCE|Métriques"`. Ce délai exclut le silence de détection, à ajouter pour obtenir le ressenti total.

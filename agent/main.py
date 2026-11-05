@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import asyncio
+import time
 import urllib.request
 import urllib.error
 from dotenv import load_dotenv
@@ -19,6 +20,14 @@ configure_gemini_network()
 # Configuration du logger
 logger = logging.getLogger("livekit-agent")
 logger.setLevel(logging.INFO)
+
+# Silence (ms) avant que Gemini considère la réponse du candidat terminée.
+# Plus bas = recruteur plus réactif, mais risque de couper le candidat quand il réfléchit.
+# Réglable sans modifier le code : SILENCE_DURATION_MS dans l'environnement PM2.
+try:
+    SILENCE_DURATION_MS = max(200, min(1500, int(os.environ.get("SILENCE_DURATION_MS", "450"))))
+except ValueError:
+    SILENCE_DURATION_MS = 450
 
 # Base de données locales des recruteurs
 RECRUITERS = {
@@ -215,15 +224,40 @@ IMPORTANT - DIRECTIVE DE STYLE ET FORMAT :
             automatic_activity_detection=types.AutomaticActivityDetection(
                 disabled=False,
                 end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                silence_duration_ms=600
+                silence_duration_ms=SILENCE_DURATION_MS
             )
         )
     )
     
     session = AgentSession(llm=llm)
     
+    # Mesure de latence : fin de parole détectée du candidat -> début de parole du recruteur.
+    # Visible dans `pm2 logs` ; n'a aucun effet sur la conversation.
+    turn_timing = {'user_stopped': None, 'thinking': None}
+
+    @session.on("user_state_changed")
+    def on_user_state_changed(event):
+        if event.old_state == "speaking" and event.new_state == "listening":
+            turn_timing['user_stopped'] = time.monotonic()
+            turn_timing['thinking'] = None
+
     @session.on("agent_state_changed")
     def on_agent_state_changed(event):
+        now = time.monotonic()
+        started = turn_timing['user_stopped']
+        if started is not None:
+            if event.new_state == "thinking" and turn_timing['thinking'] is None:
+                turn_timing['thinking'] = now
+            elif event.new_state == "speaking":
+                thinking = turn_timing['thinking']
+                logger.info(
+                    "LATENCE tour : %.2fs entre la fin de parole détectée et le début de réponse "
+                    "(dont %s avant le passage en réflexion) ; silence configuré : %d ms",
+                    now - started,
+                    f"{thinking - started:.2f}s" if thinking is not None else "n/a",
+                    SILENCE_DURATION_MS,
+                )
+                turn_timing['user_stopped'] = None
         if ctx.room.isconnected():
             payload = json.dumps({'type': 'agent_state', 'state': event.new_state}).encode('utf-8')
             asyncio.create_task(ctx.room.local_participant.publish_data(payload, reliable=True))
@@ -244,6 +278,9 @@ IMPORTANT - DIRECTIVE DE STYLE ET FORMAT :
         item = event.item
         if hasattr(item, 'role') and item.role == 'assistant' and item.text_content:
             logger.info(f"{transcript_label} transcript : {item.text_content}")
+            metrics = getattr(item, 'metrics', None)
+            if metrics:
+                logger.info(f"Métriques du tour : {dict(metrics)}")
             payload = json.dumps({
                 'type': 'transcript',
                 'role': role_label,
