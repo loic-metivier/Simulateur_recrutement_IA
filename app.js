@@ -954,8 +954,38 @@
     } catch { showToast("Votre réponse n'a pas été envoyée. Réessayez."); }
   }
 
+  function setReportSections({summary, criteria, rework}) {
+    $(".report-summary").hidden = !summary;
+    $(".criteria-card").hidden = !criteria;
+    $("#answer-review-card").hidden = !rework;
+  }
+
+  function setScoreRing(score) {
+    const fill = typeof score === "number"
+      ? `#94e1c2 0 ${score}%, rgba(255,255,255,.2) ${score}% 100%`
+      : "rgba(255,255,255,.22) 0 100%";
+    $("#readiness-ring").style.background = `radial-gradient(circle at center, #5540ad 54%, transparent 55%), conic-gradient(${fill})`;
+  }
+
+  function renderCriteria(criteria) {
+    const list = $("#criteria-list");
+    list.innerHTML = "";
+    criteria.forEach((criterion) => {
+      const value = Math.max(0, Math.min(100, Math.round(Number(criterion.score)) || 0));
+      const article = document.createElement("article");
+      article.className = "criterion";
+      article.innerHTML = `<div><strong></strong><span>Évaluation</span></div><div class="progress-track"><span></span></div><strong></strong><p></p>`;
+      $("div strong", article).textContent = criterion.name || "";
+      $(".progress-track span", article).style.setProperty("--value", `${value}%`);
+      article.children[2].textContent = value;
+      $("p", article).textContent = criterion.comment || "";
+      list.append(article);
+    });
+  }
+
   async function buildReport() {
     const partial = state.exchangeCount < 3;
+    $("#report-retry-button").hidden = true;
     if (partial) {
       $("#report-title").textContent = "Analyse partielle : poursuivez l'entretien";
       $("#report-subtitle").textContent = "Trop peu de réponses sont disponibles pour produire une évaluation fiable. Votre transcript reste intégralement accessible.";
@@ -963,21 +993,21 @@
       $("#score-unit").textContent = "";
       $("#score-label").textContent = "Données insuffisantes";
       $("#score-confidence").textContent = `${state.exchangeCount} réponse${state.exchangeCount > 1 ? "s" : ""} · minimum 3`;
-      $("#readiness-ring").style.background = "radial-gradient(circle at center, #5540ad 54%, transparent 55%), conic-gradient(rgba(255,255,255,.22) 0 100%)";
+      setScoreRing(null);
       $("#criteria-list").innerHTML = ["Clarté et concision", "Pertinence pour le poste", "Qualité des exemples", "Motivation", "Expression orale"].map((criterion) => `
         <article class="criterion"><div><strong>${criterion}</strong><span>Non évalué</span></div><div class="progress-track"><span style="--value:0%"></span></div><strong>—</strong><p>Donnée insuffisante : répondez à au moins trois questions pour obtenir une observation fiable.</p></article>
       `).join("");
-      $("#answer-review-card").hidden = true;
+      setReportSections({summary: false, criteria: true, rework: false});
     } else {
-      // Show loading state first
+      // Aucun contenu d'exemple ne doit rester visible pendant l'analyse.
+      setReportSections({summary: false, criteria: false, rework: false});
       $("#report-title").textContent = "Analyse personnalisée en cours...";
       $("#report-subtitle").textContent = "Notre coach IA analyse vos réponses et prépare vos recommandations personnalisées. Veuillez patienter quelques instants.";
       $("#score-value").textContent = "...";
       $("#score-unit").textContent = "";
       $("#score-label").textContent = "Analyse en cours";
       $("#score-confidence").textContent = "En attente des résultats";
-      $("#readiness-ring").style.background = "radial-gradient(circle at center, #5540ad 54%, transparent 55%), conic-gradient(rgba(255,255,255,.22) 0 100%)";
-      $("#answer-review-card").hidden = true;
+      setScoreRing(null);
 
       try {
         const response = await fetch('/api/generate-report', {
@@ -992,6 +1022,7 @@
               title: state.scenario.title,
               person: state.scenario.person,
               role: state.scenario.role,
+              position: state.scenario.position,
               objective: state.scenario.objective,
               context: state.scenario.context
             }
@@ -1003,19 +1034,18 @@
         }
 
         const data = await response.json();
-        
-        // Populate fields
+        if (!Array.isArray(data.criteria) || data.criteria.length === 0) throw new Error("Rapport incomplet");
+
         $("#report-title").textContent = data.reportTitle || "Bilan de votre entretien";
         $("#report-subtitle").textContent = data.reportSubtitle || "";
-        
-        const score = data.score || 70;
+
+        const score = Math.max(0, Math.min(100, Math.round(Number(data.score)) || 0));
         $("#score-value").textContent = score;
         $("#score-unit").textContent = "/100";
         $("#score-label").textContent = data.readinessLabel || (score >= 82 ? "Très bien préparé" : "Prêt à convaincre");
-        $("#score-confidence").textContent = `Analyse fiable · ${state.exchangeCount} réponses`;
-        $("#readiness-ring").style.background = `radial-gradient(circle at center, #5540ad 54%, transparent 55%), conic-gradient(#94e1c2 0 ${score}%, rgba(255,255,255,.2) ${score}% 100%)`;
+        $("#score-confidence").textContent = `Analyse de votre entretien · ${state.exchangeCount} réponses`;
+        setScoreRing(score);
 
-        // Point fort, progrès, exercice
         $("#report-strength-title").textContent = data.pointFortTitle || "Point fort";
         $("#report-strength-desc").textContent = data.pointFortDesc || "";
         $("#report-progress-title").textContent = data.progresTitle || "Axe d'amélioration";
@@ -1023,42 +1053,28 @@
         $("#report-exercise-title").textContent = data.exerciceTitle || "Exercice";
         $("#report-exercise-desc").textContent = data.exerciceDesc || "";
 
-        // Criteria list
-        $("#criteria-list").innerHTML = (data.criteria || []).map((c) => {
-          const cScore = c.score || 70;
-          return `
-            <article class="criterion">
-              <div><strong>${c.name}</strong><span>Évaluation</span></div>
-              <div class="progress-track"><span style="--value:${cScore}%"></span></div>
-              <strong>${cScore}</strong>
-              <p>${c.comment || ''}</p>
-            </article>
-          `;
-        }).join("");
+        renderCriteria(data.criteria);
 
-        // Rework card
-        if (data.reworkQuestion) {
-          $("#answer-review-card").hidden = false;
+        const hasRework = Boolean(data.reworkQuestion);
+        if (hasRework) {
           $("#answer-review-title").textContent = `« ${data.reworkQuestion} »`;
           $("#rework-your-answer").textContent = `« ${data.reworkYourAnswer || ''} »`;
           $("#rework-shortcomings").textContent = data.reworkShortcomings || "";
           $("#rework-improved-answer").textContent = `« ${data.reworkImprovedAnswer || ''} »`;
-        } else {
-          $("#answer-review-card").hidden = true;
         }
-
+        setReportSections({summary: true, criteria: true, rework: hasRework});
       } catch (err) {
         console.error("Failed to generate report via Gemini:", err);
-        // Fallback to static or rule-based
-        const fallbackScore = Math.min(88, 72 + state.exchangeCount * 2);
-        $("#report-title").textContent = "Votre discours est clair et crédible";
-        $("#report-subtitle").textContent = "Vos exemples gagneraient maintenant à être plus précis et mesurables. (Rapport généré en mode secours)";
-        $("#score-value").textContent = fallbackScore;
-        $("#score-unit").textContent = "/100";
-        $("#score-label").textContent = fallbackScore >= 82 ? "Très bien préparé" : "Prêt à convaincre";
-        $("#score-confidence").textContent = `Analyse fiable (secours) · ${state.exchangeCount} réponses`;
-        $("#readiness-ring").style.background = `radial-gradient(circle at center, #5540ad 54%, transparent 55%), conic-gradient(#94e1c2 0 ${fallbackScore}%, rgba(255,255,255,.2) ${fallbackScore}% 100%)`;
-        $("#answer-review-card").hidden = false;
+        // Pas de contenu générique de secours : il ne correspondrait pas à cette simulation.
+        setReportSections({summary: false, criteria: false, rework: false});
+        $("#report-title").textContent = "Le bilan personnalisé n'a pas pu être généré";
+        $("#report-subtitle").textContent = "Le service d'analyse est momentanément indisponible. Votre entretien et son transcript sont conservés plus bas : relancez l'analyse dans quelques instants.";
+        $("#score-value").textContent = "—";
+        $("#score-unit").textContent = "";
+        $("#score-label").textContent = "Analyse indisponible";
+        $("#score-confidence").textContent = `${state.exchangeCount} réponses enregistrées`;
+        setScoreRing(null);
+        $("#report-retry-button").hidden = false;
       }
     }
     renderReportTranscript();
@@ -1321,6 +1337,7 @@
     navigate("prep");
     showToast("Mode coach activé pour retravailler cette réponse");
   });
+  $("#report-retry-button").addEventListener("click", () => buildReport());
   $("#retry-interview").addEventListener("click", () => { populatePreparation(); navigate("prep"); });
   $("#choose-another").addEventListener("click", () => navigate("home"));
 
