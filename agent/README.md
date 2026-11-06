@@ -1,4 +1,4 @@
-# Agent vocal EntretienLab
+# Agent vocal EVA
 
 Le worker accepte uniquement les salons `room_recruiter-*` et s’enregistre sous le nom `recruitment-agent`. L’API `api/get-token.ts` demande explicitement ce worker via la configuration du salon.
 

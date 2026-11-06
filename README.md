@@ -1,4 +1,4 @@
-# EntretienLab — Maquette UX/UI
+# EVA — Maquette UX/UI
 
 Prototype front-end autonome d’un simulateur voice-to-voice pour préparer des entretiens de recrutement.
 
