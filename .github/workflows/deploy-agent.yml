@@ -1,0 +1,52 @@
+name: Déployer l'agent sur le VPS
+
+# Se déclenche à chaque modification de l'agent poussée sur main, ou à la main depuis l'onglet Actions.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agent/**'
+      - '.github/workflows/deploy-agent.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-agent
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Vérifier la configuration
+        id: cfg
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$VPS_HOST" ] || [ -z "$VPS_SSH_KEY" ] || [ -z "$VPS_KNOWN_HOSTS" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Secrets VPS_HOST, VPS_SSH_KEY et VPS_KNOWN_HOSTS non configurés : déploiement ignoré."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Déployer sur le VPS
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # La clé est limitée côté serveur à agent/deploy.sh : la commande envoyée ici est ignorée.
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "${VPS_USER:-ubuntu}@${VPS_HOST}" deploy

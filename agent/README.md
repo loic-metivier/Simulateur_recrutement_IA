@@ -33,3 +33,22 @@ Chaque tour journalise une ligne `LATENCE tour` (fin de parole détectée → d�
 ## Variété des questions
 
 Pour les scénarios prédéfinis, chaque entretien tire 4 questions au hasard dans un stock d'environ 10 (`EXTRA_QUESTIONS` + questions clés de `RECRUITERS`) et l'agent est invité à les reformuler et à rebondir sur les réponses. La question d'accroche reste fixe. Pour ajouter des questions, compléter `EXTRA_QUESTIONS` dans `main.py`. Les scénarios créés à partir d'une offre sont gérés côté navigateur (`buildCustomSystemInstruction` dans `app.js`).
+
+## Déploiement automatique (GitHub Actions)
+
+À chaque push sur `main` qui touche `agent/`, le workflow `.github/workflows/deploy-agent.yml` se connecte au VPS en SSH et exécute `agent/deploy.sh` (`git pull --ff-only`, vérification de syntaxe Python, `pm2 restart livekit-recruitment-agent`). On peut aussi le lancer à la main : onglet *Actions* → *Déployer l'agent sur le VPS* → *Run workflow*. Tant que les secrets ci-dessous ne sont pas configurés, le workflow ne fait rien.
+
+Configuration à faire une seule fois :
+
+1. **Clé dédiée** (sur ton Mac, sans passphrase, utilisée uniquement par GitHub) :
+   `ssh-keygen -t ed25519 -f ~/.ssh/ovh_deploy -N "" -C github-deploy`
+2. **Autoriser la clé sur le VPS**, limitée à la seule commande de déploiement : ajouter cette ligne à `~/.ssh/authorized_keys` de l'utilisateur `ubuntu` (remplacer `CLE_PUBLIQUE` par le contenu de `~/.ssh/ovh_deploy.pub`) :
+   `command="bash /home/ubuntu/Simulateur_recrutement_agent/agent/deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty CLE_PUBLIQUE`
+3. **Secrets GitHub** (*Settings → Secrets and variables → Actions → New repository secret*) :
+   - `VPS_HOST` : `217.182.68.149`
+   - `VPS_SSH_KEY` : contenu complet du fichier `~/.ssh/ovh_deploy` (clé privée)
+   - `VPS_KNOWN_HOSTS` : résultat de `ssh-keyscan -t ed25519 217.182.68.149` (comparer l'empreinte avec celle déjà connue de ton Mac)
+   - `VPS_USER` (optionnel) : `ubuntu` par défaut
+4. **Dépôt cloné en HTTPS sur le VPS** : `git remote -v` doit afficher une URL `https://github.com/...` (le dépôt est public, aucun identifiant n'est nécessaire).
+
+Limites : le déploiement redémarre l'agent, ce qui coupe un entretien en cours ; si `agent/requirements.txt` change, les dépendances doivent être installées à la main sur le VPS.
