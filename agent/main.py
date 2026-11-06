@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import random
 import logging
 import asyncio
 import time
@@ -145,6 +146,92 @@ Voici tes questions clés (une par une, de manière fluide) :
     }
 }
 
+# Questions supplémentaires par scénario : chaque entretien en tire quelques-unes au hasard,
+# avec les questions clés d'origine, pour que deux sessions ne se ressemblent pas.
+EXTRA_QUESTIONS = {
+    'rh-product-manager': [
+        "Comment décidez-vous de ce qui doit être priorisé quand plusieurs équipes réclament la même ressource ?",
+        "Parlez-moi d'une fonctionnalité que vous avez contribué à lancer et de la manière dont vous en avez mesuré le succès.",
+        "Comment travaillez-vous avec des équipes tech et commerciales qui n'ont pas les mêmes priorités ?",
+        "Qu'avez-vous appris d'un projet qui n'a pas atteint son objectif ?",
+        "Que savez-vous de notre marché, et où voyez-vous une opportunité pour NovaTech ?",
+        "Comment recueillez-vous et exploitez-vous les retours des utilisateurs ?",
+    ],
+    'rh-sales': [
+        "Comment vous y prendriez-vous pour décrocher un premier rendez-vous avec un prospect qui ne vous connaît pas ?",
+        "Comment gérez-vous un refus ou une absence de réponse ?",
+        "Qu'est-ce qui, selon vous, construit un vrai rapport de confiance avec un client ?",
+        "Comment organisez-vous votre journée quand vos objectifs sont mesurés chaque mois ?",
+        "Qu'est-ce qui vous inquiète dans cette reconversion, et comment comptez-vous y répondre ?",
+        "Racontez-moi une négociation où vous avez dû trouver un compromis.",
+    ],
+    'manager-product': [
+        "Comment décidez-vous d'arrêter une fonctionnalité qui ne performe pas ?",
+        "Quelles métriques suivez-vous pour juger la santé d'un produit, et pourquoi celles-là ?",
+        "Racontez-moi comment vous avez construit une roadmap avec des contraintes contradictoires.",
+        "Comment développez-vous l'autonomie de votre équipe sans perdre le contrôle du résultat ?",
+        "Quelle erreur de discovery avez-vous déjà faite, et qu'avez-vous changé depuis ?",
+        "Comment présentez-vous un arbitrage difficile à la direction ?",
+    ],
+    'tech-frontend': [
+        "Comment structurez-vous un composant réutilisable pour qu'il reste maintenable dans le temps ?",
+        "Comment décidez-vous d'introduire une nouvelle bibliothèque ou un nouveau framework dans un projet ?",
+        "Comment testez-vous votre interface, et qu'est-ce qui ne vaut pas la peine d'être testé selon vous ?",
+        "Comment gérez-vous l'état d'une application quand elle devient complexe ?",
+        "Racontez-moi un bug difficile à reproduire et comment vous l'avez résolu.",
+        "Comment faites-vous une revue de code utile sans braquer la personne qui l'a écrite ?",
+    ],
+    'behavior-star': [
+        "Parlez-moi d'une situation où un projet a dérapé en délai ou en budget et de votre réaction.",
+        "Racontez un conflit au sein d'une équipe que vous avez contribué à résoudre.",
+        "Donnez-moi un exemple où vous avez dû vous adapter à un changement de dernière minute.",
+        "Décrivez une situation où vous avez dû convaincre sans avoir d'autorité hiérarchique.",
+        "Parlez-moi d'une réussite dont vous êtes particulièrement fier et de votre rôle précis.",
+        "Racontez un moment où vous avez dû dire non à une demande importante.",
+    ],
+    'final-director': [
+        "Quel processus opérationnel amélioreriez-vous en premier chez Vectra, et pourquoi ?",
+        "Comment gérez-vous une crise opérationnelle qui touche plusieurs équipes en même temps ?",
+        "Comment construisez-vous la confiance avec une équipe que vous ne connaissez pas encore ?",
+        "Quelle décision difficile avez-vous prise récemment, et comment l'avez-vous assumée ?",
+        "Comment arbitrez-vous entre coût, qualité et délai ?",
+        "Quelle objection auriez-vous à ma place pour ne pas vous recruter ?",
+    ],
+    'salary-negotiation': [
+        "Quelle part de votre rémunération souhaitez-vous voir liée à la performance, et pourquoi ?",
+        "Quels éléments non financiers pourraient compenser un écart sur le salaire fixe ?",
+        "Comment justifiez-vous votre valeur par rapport au marché ?",
+        "Si une autre offre vous était faite, comment vous positionneriez-vous ?",
+        "Quelle évolution attendez-vous dans les douze à dix-huit mois qui suivent votre arrivée ?",
+        "Quel serait pour vous le point de non-retour dans cette négociation ?",
+    ],
+}
+
+KEY_QUESTIONS_RE = re.compile(r"(Voici tes questions clés[^\n]*\n)((?:\d+\. [^\n]*(?:\n|$))+)")
+
+VARIETY_DIRECTIVE = """
+
+IMPORTANT - VARIÉTÉ DES QUESTIONS :
+- Les questions clés ci-dessus sont des pistes, pas un script : formule-les avec tes propres mots, ne les lis jamais mot pour mot.
+- Rebondis d'abord sur un détail précis de la dernière réponse du candidat (un chiffre, un exemple, une hésitation) ; si la réponse est vague, demande un exemple concret.
+- Ne répète jamais une question déjà posée, ni sa reformulation.
+- Tu peux remplacer une question clé par une question de ton cru si la conversation s'y prête.
+- Termine l'entretien en demandant au candidat s'il a des questions.
+"""
+
+def vary_questions(recruiter_id, instruction, count=4):
+    """Remplace la liste fixe de questions clés par un tirage aléatoire dans un stock plus large."""
+    match = KEY_QUESTIONS_RE.search(instruction)
+    if not match:
+        return instruction
+    lines = [line for line in match.group(2).splitlines() if line.strip()]
+    opening = [line for line in lines if 'Déjà posée' in line]
+    core = [re.sub(r"^\d+\.\s*", "", line) for line in lines if 'Déjà posée' not in line]
+    pool = [q for q in core + EXTRA_QUESTIONS.get(recruiter_id, []) if not q.startswith('Pour terminer')]
+    chosen = random.sample(pool, min(count, len(pool)))
+    numbered = opening + [f"{i}. {q}" for i, q in enumerate(chosen, start=len(opening) + 1)]
+    return instruction[:match.start(2)] + "\n".join(numbered) + "\n" + instruction[match.end(2):]
+
 # Base de données locales des prospects
 def custom_recruiter(metadata, recruiter_id):
     data = json.loads(metadata)
@@ -185,7 +272,8 @@ async def entrypoint(ctx: JobContext):
                 await ctx.room.local_participant.publish_data(json.dumps({'type': 'agent_error', 'message': 'Le scénario personnalisé est incomplet. Recréez-le.'}).encode(), reliable=True)
                 raise
         else:
-            recruiter_data = RECRUITERS[recruiter_id]
+            recruiter_data = dict(RECRUITERS[recruiter_id])
+            recruiter_data['instruction'] = vary_questions(recruiter_id, recruiter_data['instruction']) + VARIETY_DIRECTIVE
 
         global_directive = """
 IMPORTANT - DÉFINITION DES RÔLES :

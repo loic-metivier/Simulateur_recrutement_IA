@@ -28,3 +28,8 @@ Gemini détecte la fin de parole après 450 ms de silence par défaut (variable 
 ## Mesurer la latence
 
 Chaque tour journalise une ligne `LATENCE tour` (fin de parole détectée → début de réponse du recruteur) et `Métriques du tour`. Lecture : `pm2 logs livekit-recruitment-agent --lines 200 | grep -E "LATENCE|Métriques"`. Ce délai exclut le silence de détection, à ajouter pour obtenir le ressenti total.
+
+
+## Variété des questions
+
+Pour les scénarios prédéfinis, chaque entretien tire 4 questions au hasard dans un stock d'environ 10 (`EXTRA_QUESTIONS` + questions clés de `RECRUITERS`) et l'agent est invité à les reformuler et à rebondir sur les réponses. La question d'accroche reste fixe. Pour ajouter des questions, compléter `EXTRA_QUESTIONS` dans `main.py`. Les scénarios créés à partir d'une offre sont gérés côté navigateur (`buildCustomSystemInstruction` dans `app.js`).
