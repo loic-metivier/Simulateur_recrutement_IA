@@ -1472,6 +1472,8 @@ ${angles}
     navigate("home", { bypassFeedback: true });
   });
 
+  let feedbackSending = false;
+
   feedbackForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const starsValue = parseInt(starsInput.value, 10);
@@ -1488,8 +1490,22 @@ ${angles}
       return;
     }
 
-    try {
-      await db.collection("feedbacks").add({
+    // Évite les doublons (double clic) pendant l'envoi.
+    const submitBtn = $("#feedback-submit-btn");
+    if (feedbackSending) return;
+    feedbackSending = true;
+    const submitLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Envoi…";
+
+    // Un envoi qui ne répond pas (réseau coupé) ne doit pas figer le formulaire.
+    const withTimeout = (promise) => Promise.race([
+      promise,
+      new Promise((_, reject) => window.setTimeout(() => reject(new Error("Délai d'envoi dépassé")), 10000))
+    ]);
+
+    const writes = [
+      withTimeout(db.collection("feedbacks").add({
         sessionId: state.sessionId || "anonymous",
         improveSalesRating: starsValue,
         recommendRating: npsValue,
@@ -1498,26 +1514,39 @@ ${angles}
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         scenarioId: state.scenario ? (state.scenario.id || "custom") : "unknown",
         scenarioTitle: state.scenario ? (state.scenario.title || "Custom Scenario") : "Unknown"
-      });
-
-      // Enregistre également le feedback directement sur la session pour le suivi live
-      if (state.sessionId) {
-        await db.collection("sessions").doc(state.sessionId).update({
-          feedback: {
-            improveProcessAndTechniques: starsValue,
-            helpCareerProgress: npsValue,
-            liked: likesText,
-            improved: improvementsText
-          }
-        }).catch(err => console.error("Erreur de sauvegarde feedback sur session:", err));
-      }
-
-      await logSessionAction('submit_feedback', 'A soumis le questionnaire de feedback qualitatif');
-      showToast("Merci pour votre retour !");
-    } catch (err) {
-      console.error("Erreur lors de la sauvegarde du feedback :", err);
+      }))
+    ];
+    // Enregistre également le feedback directement sur la session pour le suivi live
+    if (state.sessionId) {
+      writes.push(withTimeout(db.collection("sessions").doc(state.sessionId).update({
+        feedback: {
+          improveProcessAndTechniques: starsValue,
+          helpCareerProgress: npsValue,
+          liked: likesText,
+          improved: improvementsText
+        }
+      })));
     }
 
+    // Les deux enregistrements sont indépendants : l'avis est conservé dès qu'un des deux réussit.
+    const results = await Promise.allSettled(writes);
+    results.forEach((result, index) => {
+      if (result.status === "rejected") console.error(`Erreur de sauvegarde du feedback (${index === 0 ? "feedbacks" : "session"}) :`, result.reason);
+    });
+    const saved = results.some((result) => result.status === "fulfilled");
+
+    feedbackSending = false;
+    submitBtn.disabled = false;
+    submitBtn.textContent = submitLabel;
+
+    if (!saved) {
+      // Rien n'a été enregistré : on garde le formulaire ouvert, rempli, pour réessayer ou passer.
+      showToast("L'envoi a échoué. Vérifiez votre connexion et réessayez, ou cliquez sur « Passer ».");
+      return;
+    }
+
+    await logSessionAction('submit_feedback', 'A soumis le questionnaire de feedback qualitatif');
+    showToast("Merci pour votre retour !");
     resetFeedbackForm();
     feedbackDialog.close();
     navigate("home", { bypassFeedback: true });
