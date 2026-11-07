@@ -691,10 +691,13 @@
       testButton.disabled = false;
       testButton.hidden = false;
     }
-    $("#start-interview").disabled = !ready;
-    $("#start-help").textContent = ready
-      ? (textMode ? "Vous répondrez par écrit pendant la simulation." : "Tout est prêt. Vous gardez le contrôle du micro.")
-      : "Testez le micro pour continuer.";
+    const consented = $("#consent-age").checked && $("#consent-recording").checked;
+    $("#start-interview").disabled = !(ready && consented);
+    $("#start-help").textContent = !ready
+      ? "Testez le micro pour continuer."
+      : !consented
+        ? "Cochez les deux cases ci-dessus pour démarrer."
+        : (textMode ? "Vous répondrez par écrit pendant la simulation." : "Tout est prêt. Vous gardez le contrôle du micro.");
   }
 
   async function testMicrophone() {
@@ -1289,6 +1292,8 @@ ${angles}
 
   $("#test-microphone").addEventListener("click", testMicrophone);
   $("#start-interview").addEventListener("click", startInterview);
+  ["#consent-age", "#consent-recording"].forEach((selector) => $(selector).addEventListener("change", updatePreflight));
+  $$("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => $("#" + button.dataset.openDialog).showModal()));
 
   $("#turn-action").addEventListener("click", () => {
     if (state.conversationState === "user-ready") setConversationState("listening");

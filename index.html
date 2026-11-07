@@ -68,7 +68,7 @@
         <div class="hero__copy">
           <p class="eyebrow"><span aria-hidden="true"></span> Entraînement voice-to-voice</p>
           <h1 id="home-title" tabindex="-1">Quel entretien préparez-vous&nbsp;?</h1>
-          <p>Choisissez une situation. Votre recruteur virtuel adaptera ses questions à votre objectif et à votre niveau.</p>
+          <p>Choisissez une situation. Votre interlocuteur, simulé par I.A, adaptera ses questions à votre objectif et à votre niveau.</p>
           <div class="hero__reassurance" aria-label="Informations sur le service">
             <span><strong>8 min</strong> en moyenne</span>
             <span><strong>Sans jugement</strong> entraînement privé</span>
@@ -245,7 +245,18 @@
 
           <div class="privacy-note">
             <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-            <span>Votre voix est transmise au recruteur virtuel pendant l’entretien.</span>
+            <span><strong>Entretien simulé par I.A</strong> — votre interlocuteur est une intelligence artificielle, pas une personne réelle.</span>
+          </div>
+
+          <div class="consent-box" id="consent-box">
+            <label class="check-row">
+              <input type="checkbox" id="consent-age">
+              <span><strong>J'ai 18 ans ou plus</strong><small>Ce service est réservé aux personnes majeures.</small></span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="consent-recording">
+              <span><strong>J'accepte l'enregistrement de ma voix et sa transcription</strong><small>Ma voix est envoyée à un service d'I.A pendant l'entretien, et la transcription sert à générer mon bilan. <button type="button" class="link-button" data-open-dialog="privacy-dialog">Politique de confidentialité</button></small></span>
+            </label>
           </div>
 
           <button class="button button--primary button--large button--full" type="button" id="start-interview" disabled>Démarrer l'entretien <span aria-hidden="true">→</span></button>
@@ -256,7 +267,7 @@
 
     <section class="view interview-view" id="interview-view" data-view="interview" aria-labelledby="interview-title" hidden>
       <div class="interview-topline">
-        <div><p class="eyebrow">Simulation en cours</p><h1 id="interview-title" tabindex="-1">Entretien avec <span id="interview-person-title">Camille Robert</span></h1></div>
+        <div><p class="eyebrow">Simulation en cours · Entretien simulé par I.A</p><h1 id="interview-title" tabindex="-1">Entretien avec <span id="interview-person-title">Camille Robert</span></h1></div>
         <div class="interview-time" aria-label="Durée de l'entretien"><span class="recording-dot" aria-hidden="true"></span><time id="interview-timer">00:00</time></div>
       </div>
 
@@ -379,6 +390,34 @@
       </div>
     </section>
   </main>
+
+  <footer class="site-footer">
+    <p>Entretien simulé par I.A · <button type="button" class="link-button" data-open-dialog="privacy-dialog">Politique de confidentialité</button></p>
+  </footer>
+
+  <dialog class="modal modal--large" id="privacy-dialog" aria-labelledby="privacy-title">
+    <form method="dialog">
+      <button class="modal__close" value="close" aria-label="Fermer la politique de confidentialité">×</button>
+      <p class="eyebrow">Vos données</p>
+      <h2 id="privacy-title">Politique de confidentialité</h2>
+      <div class="privacy-text">
+        <h3>Une intelligence artificielle, pas une personne</h3>
+        <p>Les entretiens proposés par EVA sont simulés par I.A. Le recruteur qui vous répond est une voix générée, et le bilan est rédigé par un modèle d'I.A. Ce service est un prototype d'entraînement, réservé aux personnes de 18 ans et plus.</p>
+        <h3>Ce qui est traité</h3>
+        <ul>
+          <li><strong>Votre voix</strong> est transmise en temps réel à l'I.A pendant l'entretien.</li>
+          <li><strong>La transcription</strong> de l'entretien est envoyée à l'I.A pour rédiger votre bilan. Elle n'est pas enregistrée dans la base de suivi.</li>
+          <li><strong>Des données de suivi</strong> sont enregistrées : identifiant et pseudonyme générés dans votre navigateur, navigateur utilisé, scénario choisi, durée, étapes parcourues.</li>
+          <li><strong>Votre avis</strong> (étoiles, note, commentaires) si vous remplissez le questionnaire de fin.</li>
+        </ul>
+        <h3>Qui intervient</h3>
+        <p>Google (modèle Gemini et base de données Firebase), LiveKit (transmission de la voix), Vercel (hébergement du site) et OVHcloud (serveur de l'agent vocal). Certains de ces prestataires peuvent traiter des données hors de l'Union européenne.</p>
+        <h3>Vos droits</h3>
+        <p>Vous pouvez demander l'accès, la rectification ou la suppression de vos données de suivi en contactant l'éditeur du site via <a href="https://www.loic-metivier.fr" target="_blank" rel="noopener">loic-metivier.fr</a>, en indiquant l'identifiant affiché dans l'application. Ne communiquez pas d'informations confidentielles pendant l'entretien.</p>
+      </div>
+      <button class="button button--primary button--full" value="close">J'ai compris</button>
+    </form>
+  </dialog>
 
   <dialog class="modal" id="finish-dialog" aria-labelledby="finish-dialog-title">
     <form method="dialog">
